@@ -62,43 +62,75 @@ const Chat: React.FC<ChatProps> = ({ messages, setMessages }) => {
   };
 
   return (
-    <div className="flex flex-col h-full max-w-4xl mx-auto p-4 animate-in fade-in duration-300">
-      <div className="bg-gray-900 border border-gray-800 rounded-xl flex flex-col h-[calc(100vh-120px)] overflow-hidden shadow-2xl">
+    <div className="flex flex-col h-full max-w-4xl mx-auto p-4 sm:p-6 animate-in fade-in duration-300">
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl flex flex-col h-[calc(100vh-130px)] overflow-hidden shadow-2xl backdrop-blur-sm">
         
         {/* Chat Header */}
-        <div className="px-6 py-4 border-b border-gray-800 bg-gray-900/50 flex items-center gap-3">
-          <div className="bg-emerald-500/20 p-2 rounded-full">
-            <Bot className="text-emerald-400 w-5 h-5" />
+        <div className="px-6 py-4 border-b border-slate-800/80 bg-slate-950/70 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="bg-emerald-500/15 border border-emerald-500/30 p-2 rounded-xl shadow-inner">
+              <Bot className="text-emerald-400 w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-bold text-white tracking-wide">FinWise Strategy Advisor</h2>
+                <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-mono font-medium">Grounded in BigQuery</span>
+              </div>
+              <p className="text-xs text-slate-400">Ask scenario questions, stress test allocations, or modify horizon</p>
+            </div>
           </div>
-          <div>
-            <h2 className="text-lg font-semibold text-white">FinWise Advisor</h2>
-            <p className="text-xs text-gray-400">Ask questions or adjust your strategy</p>
+
+          <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-500 font-mono">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+            Online
           </div>
         </div>
 
         {/* Messages Area */}
-        <div className="flex-grow overflow-y-auto p-6 space-y-6">
+        <div className="flex-grow overflow-y-auto p-6 space-y-6 custom-scrollbar">
           {messages.length === 0 && (
-            <div className="h-full flex flex-col items-center justify-center text-gray-500 space-y-4">
-              <Bot className="w-12 h-12 opacity-20" />
-              <p>No messages yet. Ask me about your generated plan!</p>
-              <div className="flex gap-2 flex-wrap justify-center mt-4">
-                <button onClick={() => setInput("What if I take a 6-month sabbatical in year 3?")} className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-full transition-colors">What if I take a sabbatical?</button>
-                <button onClick={() => setInput("How does inflation affect this projection?")} className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-full transition-colors">How does inflation affect this?</button>
-                <button onClick={() => setInput("Can we make the portfolio more aggressive?")} className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-full transition-colors">Make it more aggressive</button>
+            <div className="h-full flex flex-col items-center justify-center text-slate-400 space-y-5 my-auto py-12 text-center">
+              <div className="w-16 h-16 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-center shadow-xl">
+                <Bot className="w-8 h-8 text-emerald-400/60" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-slate-200">Interactive Advisor Ready</h3>
+                <p className="text-xs text-slate-400 max-w-sm mt-1">Ask questions about your plan's risk score, tax efficiency, or test custom life scenarios:</p>
+              </div>
+              <div className="flex gap-2 flex-wrap justify-center max-w-lg mt-2">
+                <button 
+                  onClick={() => setInput("What if I take a 6-month sabbatical in year 3?")} 
+                  className="text-xs bg-slate-950 hover:bg-slate-800/80 border border-slate-800 hover:border-slate-700 text-slate-300 px-3.5 py-2 rounded-xl transition-all shadow-sm active:scale-95"
+                >
+                  🌴 What if I take a 6-month sabbatical?
+                </button>
+                <button 
+                  onClick={() => setInput("How does a spike in inflation affect this projection?")} 
+                  className="text-xs bg-slate-950 hover:bg-slate-800/80 border border-slate-800 hover:border-slate-700 text-slate-300 px-3.5 py-2 rounded-xl transition-all shadow-sm active:scale-95"
+                >
+                  📈 How does higher inflation affect this?
+                </button>
+                <button 
+                  onClick={() => setInput("Can we make the asset allocation more aggressive for higher returns?")} 
+                  className="text-xs bg-slate-950 hover:bg-slate-800/80 border border-slate-800 hover:border-slate-700 text-slate-300 px-3.5 py-2 rounded-xl transition-all shadow-sm active:scale-95"
+                >
+                  🚀 Make portfolio more aggressive
+                </button>
               </div>
             </div>
           )}
           
           {messages.map((msg) => (
-            <div key={msg.id} className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-              <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${msg.role === 'user' ? 'bg-blue-600' : 'bg-emerald-600'}`}>
-                {msg.role === 'user' ? <User className="w-4 h-4 text-white" /> : <Bot className="w-4 h-4 text-white" />}
+            <div key={msg.id} className={`flex gap-3.5 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+              <div className={`flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center shadow-md ${
+                msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-emerald-600/90 text-white'
+              }`}>
+                {msg.role === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
               </div>
-              <div className={`max-w-[80%] rounded-2xl px-5 py-3 ${
+              <div className={`max-w-[82%] rounded-2xl px-5 py-3.5 shadow-md ${
                 msg.role === 'user' 
                   ? 'bg-blue-600 text-white rounded-tr-none' 
-                  : 'bg-gray-800 text-gray-200 rounded-tl-none border border-gray-700'
+                  : 'bg-slate-950 border border-slate-800 text-slate-200 rounded-tl-none'
               }`}>
                 <div className="whitespace-pre-wrap text-sm leading-relaxed">
                   {msg.text}
@@ -108,14 +140,14 @@ const Chat: React.FC<ChatProps> = ({ messages, setMessages }) => {
           ))}
           
           {isTyping && (
-            <div className="flex gap-4">
-              <div className="flex-shrink-0 w-8 h-8 rounded-full bg-emerald-600 flex items-center justify-center">
+            <div className="flex gap-3.5">
+              <div className="flex-shrink-0 w-8 h-8 rounded-xl bg-emerald-600/90 flex items-center justify-center shadow-md">
                 <Bot className="w-4 h-4 text-white" />
               </div>
-              <div className="bg-gray-800 rounded-2xl rounded-tl-none px-5 py-4 border border-gray-700 flex items-center gap-1">
-                <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+              <div className="bg-slate-950 rounded-2xl rounded-tl-none px-5 py-4 border border-slate-800 flex items-center gap-2 shadow-md">
+                <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" style={{ animationDelay: '0ms' }}></div>
+                <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" style={{ animationDelay: '200ms' }}></div>
+                <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" style={{ animationDelay: '400ms' }}></div>
               </div>
             </div>
           )}
@@ -123,26 +155,26 @@ const Chat: React.FC<ChatProps> = ({ messages, setMessages }) => {
         </div>
 
         {/* Input Area */}
-        <div className="p-4 bg-gray-900 border-t border-gray-800">
+        <div className="p-4 bg-slate-950/80 border-t border-slate-800/80">
           <div className="relative flex items-center">
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Message FinWise..."
-              className="w-full bg-gray-950 border border-gray-700 rounded-xl pl-4 pr-12 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 resize-none overflow-hidden min-h-[50px] max-h-[150px]"
+              placeholder="Ask FinWise a question or simulate market conditions... (Press Enter to send)"
+              className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-4 pr-12 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 resize-none overflow-hidden min-h-[48px] max-h-[140px] transition-all"
               rows={1}
             />
             <button
               onClick={handleSend}
               disabled={!input.trim() || isTyping}
-              className="absolute right-2 p-2 text-emerald-500 hover:text-emerald-400 disabled:text-gray-600 disabled:cursor-not-allowed transition-colors"
+              className="absolute right-2.5 p-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-md active:scale-95"
             >
-              <Send className="w-5 h-5" />
+              <Send className="w-4 h-4" />
             </button>
           </div>
-          <p className="text-center text-[10px] text-gray-600 mt-2">
-            FinWise AI can make mistakes. Consider verifying important financial information.
+          <p className="text-center text-[11px] text-slate-400 mt-2 font-mono">
+            Grounded in BigQuery historical time series. Verify critical financial decisions with licensed professionals.
           </p>
         </div>
       </div>

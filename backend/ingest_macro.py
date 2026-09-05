@@ -73,11 +73,47 @@ def fetch_market_indicator(symbol, indicator_code, indicator_name, category, uni
         print(f"  [Error Market] {symbol}: {e}")
         return []
 
-def main():
+def get_latest_dates_from_bq(client, table_ref):
+    """
+    Query BigQuery for the most recent period_date per indicator_code.
+    Returns a dict: { 'FEDFUNDS': datetime.date(2026, 7, 1), ... }
+    """
+    try:
+        query = f"SELECT indicator_code, MAX(period_date) as latest_date FROM `{table_ref}` GROUP BY indicator_code"
+        result = client.query(query).result()
+        return {row.indicator_code: row.latest_date for row in result}
+    except Exception as e:
+        print(f"  [BQ] Could not fetch latest dates: {e}")
+        return {}
+
+
+def delete_overlap_rows(client, table_ref, indicator_code, from_date):
+    """Safety dedup: delete rows for this indicator from from_date onward."""
+    try:
+        query = f"DELETE FROM `{table_ref}` WHERE indicator_code = '{indicator_code}' AND period_date >= '{from_date}'"
+        client.query(query).result()
+    except Exception:
+        pass
+
+
+def main(incremental=False, dry_run=False):
+    mode_label = "INCREMENTAL" if incremental else "FULL BACKFILL (TRUNCATE)"
     print(f"==================================================")
     print(f"  FinWise AI Macroeconomic Data Ingestion Engine  ")
     print(f"  Project: {PROJECT_ID} | Dataset: {DATASET_ID}")
+    print(f"  Mode: {mode_label}")
     print(f"==================================================")
+
+    creds = get_credentials()
+    client = bigquery.Client(project=PROJECT_ID, credentials=creds)
+    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+
+    # Get latest dates per indicator for incremental mode
+    if incremental:
+        latest_dates = get_latest_dates_from_bq(client, table_ref)
+        print(f"\n  Found existing data for {len(latest_dates)} indicators in BigQuery.")
+    else:
+        latest_dates = {}
 
     all_rows = []
 
@@ -95,7 +131,13 @@ def main():
     ]
 
     for code, name, cat, unit in fred_indicators:
-        all_rows.extend(fetch_fred_series(code, name, cat, unit))
+        rows = fetch_fred_series(code, name, cat, unit)
+        if incremental:
+            latest = latest_dates.get(code)
+            if latest:
+                rows = [r for r in rows if r["period_date"] > latest]
+        if rows:
+            all_rows.extend(rows)
 
     # 2. Market Sentiment, Currency & Volatility Indicators (Yahoo Finance)
     market_indicators = [
@@ -107,14 +149,35 @@ def main():
     ]
 
     for sym, code, name, cat, unit in market_indicators:
-        all_rows.extend(fetch_market_indicator(sym, code, name, cat, unit))
+        rows = fetch_market_indicator(sym, code, name, cat, unit)
+        if incremental:
+            latest = latest_dates.get(code)
+            if latest:
+                rows = [r for r in rows if r["period_date"] > latest]
+        if rows:
+            all_rows.extend(rows)
 
     if not all_rows:
-        print("No macro rows collected.")
+        print("\nNo new macro rows to ingest. All indicators are up to date.")
+        return
+
+    if dry_run:
+        print(f"\n  [DRY RUN] Would append {len(all_rows)} macro rows to {table_ref}.")
         return
 
     df_final = pd.DataFrame(all_rows)
     print(f"\nTotal Macro Records Collected: {len(df_final):,} rows.")
+
+    if incremental:
+        # Dedup safety: delete overlapping rows per indicator before appending
+        indicators_to_update = set(r["indicator_code"] for r in all_rows)
+        for code in indicators_to_update:
+            code_rows = [r for r in all_rows if r["indicator_code"] == code]
+            min_date = min(r["period_date"] for r in code_rows)
+            delete_overlap_rows(client, table_ref, code, min_date)
+        write_mode = "WRITE_APPEND"
+    else:
+        write_mode = "WRITE_TRUNCATE"
 
     schema = [
         bigquery.SchemaField("indicator_code", "STRING", mode="REQUIRED"),
@@ -125,20 +188,20 @@ def main():
         bigquery.SchemaField("unit", "STRING", mode="NULLABLE"),
     ]
 
-    creds = get_credentials()
-    client = bigquery.Client(project=PROJECT_ID, credentials=creds)
-    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
-
     job_config = bigquery.LoadJobConfig(
         schema=schema,
-        write_disposition="WRITE_TRUNCATE",
+        write_disposition=write_mode,
     )
 
-    print(f"\nUploading {len(df_final):,} macro records to BigQuery table: {table_ref}...")
+    print(f"\nUploading {len(df_final):,} macro records to BigQuery table: {table_ref} ({write_mode})...")
     job = client.load_table_from_dataframe(df_final, table_ref, job_config=job_config)
     job.result()
 
     print(f"SUCCESS! Loaded {job.output_rows:,} records into {table_ref}.")
 
 if __name__ == "__main__":
-    main()
+    import sys
+    is_incremental = "--incremental" in sys.argv
+    is_dry_run = "--dry-run" in sys.argv
+    main(incremental=is_incremental, dry_run=is_dry_run)
+

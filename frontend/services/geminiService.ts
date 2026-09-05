@@ -66,7 +66,7 @@ export const generateAllocationAgent = async (profile: UserProfile, benchmarks: 
   `;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-2.5-pro',
     contents: prompt,
     config: {
       responseMimeType: 'application/json',
@@ -173,7 +173,7 @@ export const generateNarrativeAgent = async (profile: UserProfile, allocation: A
   `;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-2.5-flash',
+    model: 'gemini-2.5-pro',
     contents: prompt,
     config: {
       responseMimeType: 'application/json',

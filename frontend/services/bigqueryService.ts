@@ -190,3 +190,40 @@ export const fetchMacroRegime = async () => {
   }
   return null;
 };
+
+/**
+ * Data Health & Freshness Check
+ * Queries the latest data dates across all 4 BigQuery tables.
+ * Used to display a "Data as of" badge on the dashboard.
+ */
+export interface DataHealthTable {
+  table: string;
+  latestDate: string;
+  totalRows: number;
+  daysStale: number;
+  isFresh: boolean;
+}
+
+export interface DataHealthResponse {
+  success: boolean;
+  timestamp: string;
+  overallFresh: boolean;
+  stalestTable: string;
+  stalestDays: number;
+  tables: DataHealthTable[];
+}
+
+export const fetchDataHealth = async (): Promise<DataHealthResponse | null> => {
+  try {
+    const response = await fetch('/api/bigquery/data-health');
+    if (response.ok) {
+      const data: DataHealthResponse = await response.json();
+      if (data.success) {
+        return data;
+      }
+    }
+  } catch (err) {
+    console.warn("[BigQuery Service] Failed to fetch data health:", err);
+  }
+  return null;
+};

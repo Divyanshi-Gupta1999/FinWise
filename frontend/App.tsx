@@ -134,55 +134,128 @@ const App: React.FC = () => {
       />
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+      <div className="flex-1 flex flex-col h-full overflow-hidden relative bg-slate-950">
         
         {/* Top Navigation Tabs */}
         {isPlanActive && (
-          <div className="bg-gray-900/80 backdrop-blur-md border-b border-gray-800 px-6 py-3 flex items-center gap-4 z-10">
-            <button
-              onClick={() => setActiveTab(TabState.DASHBOARD)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                activeTab === TabState.DASHBOARD 
-                  ? 'bg-gray-800 text-white' 
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50'
-              }`}
-            >
-              <LayoutDashboard className="w-4 h-4" />
-              Strategy Dashboard
-            </button>
-            <button
-              onClick={() => setActiveTab(TabState.CHAT)}
-              disabled={isGeneratingNarrative || isGeneratingProjections}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                activeTab === TabState.CHAT 
-                  ? 'bg-gray-800 text-white' 
-                  : 'text-gray-400 hover:text-gray-200 hover:bg-gray-800/50 disabled:opacity-50 disabled:cursor-not-allowed'
-              }`}
-            >
-              <MessageSquare className="w-4 h-4" />
-              AI Advisor Chat
-            </button>
+          <div className="bg-slate-900/90 backdrop-blur-md border-b border-slate-800/80 px-6 py-2.5 flex items-center justify-between z-10">
+            <div className="flex items-center gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800/80">
+              <button
+                onClick={() => setActiveTab(TabState.DASHBOARD)}
+                className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all ${
+                  activeTab === TabState.DASHBOARD 
+                    ? 'bg-slate-800 text-white shadow-sm' 
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                }`}
+              >
+                <LayoutDashboard className="w-3.5 h-3.5 text-emerald-400" />
+                Strategy Dashboard
+              </button>
+              <button
+                onClick={() => setActiveTab(TabState.CHAT)}
+                disabled={isGeneratingNarrative || isGeneratingProjections}
+                className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-semibold uppercase tracking-wider transition-all ${
+                  activeTab === TabState.CHAT 
+                    ? 'bg-slate-800 text-white shadow-sm' 
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900 disabled:opacity-40 disabled:cursor-not-allowed'
+                }`}
+              >
+                <MessageSquare className="w-3.5 h-3.5 text-blue-400" />
+                AI Advisor Chat
+              </button>
+            </div>
+
+            <div className="hidden md:flex items-center gap-2 text-xs font-mono text-slate-400">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              725,000+ BigQuery Nodes Active
+            </div>
           </div>
         )}
 
         {/* Content Body */}
         <div className="flex-1 overflow-y-auto relative custom-scrollbar">
           {error && (
-            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-red-500/10 border border-red-500/50 text-red-400 px-6 py-3 rounded-lg shadow-lg z-50 flex items-center gap-3">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-red-500/10 border border-red-500/40 text-red-300 px-5 py-3 rounded-xl shadow-2xl z-50 flex items-center gap-3 text-sm font-medium backdrop-blur-md">
+              <svg className="w-5 h-5 text-red-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
               {error}
             </div>
           )}
 
           {!isPlanActive && (
-            <div className="h-full flex flex-col items-center justify-center text-gray-500 p-8 text-center">
-              <div className="w-24 h-24 bg-gray-900 rounded-full flex items-center justify-center mb-6 shadow-inner border border-gray-800">
-                <LayoutDashboard className="w-10 h-10 text-gray-700" />
+            <div className="h-full flex flex-col items-center justify-center text-slate-400 p-8 text-center max-w-2xl mx-auto">
+              <div className="w-20 h-20 bg-slate-900/80 rounded-2xl flex items-center justify-center mb-6 shadow-2xl border border-slate-800/80 relative">
+                <div className="absolute inset-0 bg-emerald-500/5 rounded-2xl animate-pulse"></div>
+                <LayoutDashboard className="w-9 h-9 text-emerald-400" />
               </div>
-              <h2 className="text-2xl font-semibold text-gray-300 mb-2">Awaiting Profile Data</h2>
-              <p className="max-w-md text-gray-500">
-                Enter your financial parameters in the sidebar and click "Generate Autonomous Plan" to let our multi-agent system synthesize your strategy.
+              <h2 className="text-2xl font-bold text-slate-100 tracking-tight mb-2">Autonomous Wealth Strategy Studio</h2>
+              <p className="text-sm text-slate-400 leading-relaxed mb-6">
+                Enter your client's financial parameters on the left and click <span className="text-emerald-400 font-semibold">"Generate Autonomous Plan"</span> to trigger 4 parallel AI agents backed by 725,000+ real-time BigQuery records.
               </p>
+
+              {/* Quick Sample Profiles for Instant Exploration */}
+              <div className="w-full bg-slate-900/60 border border-slate-800/80 rounded-2xl p-4 text-left">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
+                  ⚡ Quick-Load Test Profiles:
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <button
+                    onClick={() => {
+                      setProfile({
+                        income: 150000,
+                        expenses: 50000,
+                        capital: 500000,
+                        market: 'IN',
+                        objective: 'MILESTONE',
+                        riskProfile: 'MODERATE',
+                        goalAmount: 2500000,
+                        goalHorizon: 7
+                      });
+                    }}
+                    className="p-3 rounded-xl bg-slate-950 border border-slate-800 hover:border-emerald-500/50 hover:bg-slate-900 text-left transition-all group"
+                  >
+                    <span className="text-xs font-bold text-white group-hover:text-emerald-400 block mb-0.5">Family Milestone</span>
+                    <span className="text-[11px] text-slate-400 font-mono block">₹1.5L/mo • 7 Yr • Moderate</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setProfile({
+                        income: 300000,
+                        expenses: 90000,
+                        capital: 1500000,
+                        market: 'IN',
+                        objective: 'FIRE',
+                        riskProfile: 'AGGRESSIVE',
+                        goalAmount: 0,
+                        goalHorizon: 15
+                      });
+                    }}
+                    className="p-3 rounded-xl bg-slate-950 border border-slate-800 hover:border-emerald-500/50 hover:bg-slate-900 text-left transition-all group"
+                  >
+                    <span className="text-xs font-bold text-white group-hover:text-emerald-400 block mb-0.5">Aggressive FIRE</span>
+                    <span className="text-[11px] text-slate-400 font-mono block">₹3.0L/mo • 15 Yr • Aggressive</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setProfile({
+                        income: 200000,
+                        expenses: 80000,
+                        capital: 2000000,
+                        market: 'IN',
+                        objective: 'RETIREMENT',
+                        riskProfile: 'CONSERVATIVE',
+                        goalAmount: 0,
+                        goalHorizon: 20
+                      });
+                    }}
+                    className="p-3 rounded-xl bg-slate-950 border border-slate-800 hover:border-emerald-500/50 hover:bg-slate-900 text-left transition-all group"
+                  >
+                    <span className="text-xs font-bold text-white group-hover:text-emerald-400 block mb-0.5">Retirement Corpus</span>
+                    <span className="text-[11px] text-slate-400 font-mono block">₹2.0L/mo • 20 Yr • Conservative</span>
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 

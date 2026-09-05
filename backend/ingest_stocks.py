@@ -234,31 +234,90 @@ def fetch_single_ticker(stock_info, category, start_date_str, end_date_str):
         print(f"  [Error] {sym}: {e}")
         return []
 
-def fetch_and_upload():
+def get_latest_dates_from_bq(client, table_ref):
+    """
+    Query BigQuery for the most recent trade_date per symbol.
+    Returns a dict: { 'AAPL': datetime.date(2026, 8, 29), ... }
+    Used for incremental ingestion to avoid re-downloading historical data.
+    """
+    try:
+        query = f"SELECT symbol, MAX(trade_date) as latest_date FROM `{table_ref}` GROUP BY symbol"
+        result = client.query(query).result()
+        return {row.symbol: row.latest_date for row in result}
+    except Exception as e:
+        print(f"  [BQ] Could not fetch latest dates (table may not exist yet): {e}")
+        return {}
+
+
+def delete_overlap_rows(client, table_ref, symbol, from_date):
+    """
+    Safety dedup: delete rows for this symbol from from_date onward
+    before appending. Handles partial/failed prior runs.
+    """
+    try:
+        query = f"DELETE FROM `{table_ref}` WHERE symbol = '{symbol}' AND trade_date >= '{from_date}'"
+        client.query(query).result()
+    except Exception:
+        pass  # Table may not exist on first run
+
+
+def fetch_and_upload(incremental=False, dry_run=False):
+    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
+    mode_label = "INCREMENTAL" if incremental else "FULL BACKFILL (TRUNCATE)"
+
     print(f"==================================================")
-    print(f"  FinWise AI Massive BigQuery Ingestion Pipeline  ")
+    print(f"  FinWise AI BigQuery Stock Ingestion Pipeline  ")
     print(f"  Project: {PROJECT_ID} | Dataset: {DATASET_ID}")
+    print(f"  Mode: {mode_label}")
     print(f"==================================================")
     
     creds = get_credentials()
     client = bigquery.Client(project=PROJECT_ID, credentials=creds)
     
-    # 20+ Years Historical Window (2005 - Present)
-    start_date = "2005-01-01"
     end_date = datetime.datetime.now().strftime("%Y-%m-%d")
+
+    # Determine start dates per symbol
+    if incremental:
+        latest_dates = get_latest_dates_from_bq(client, table_ref)
+        print(f"\n  Found existing data for {len(latest_dates)} symbols in BigQuery.")
+    else:
+        latest_dates = {}
     
     tasks = []
+    skipped = 0
     for category, stocks in STOCKS.items():
         for stock in stocks:
-            tasks.append((stock, category))
+            sym = stock["symbol"]
+            latest = latest_dates.get(sym) if incremental else None
+
+            if incremental and latest:
+                if latest >= datetime.date.today() - datetime.timedelta(days=1):
+                    skipped += 1
+                    continue  # Already up to date
+                start_date = (latest + datetime.timedelta(days=1)).isoformat()
+            else:
+                start_date = "2005-01-01"
             
-    print(f"Starting multi-threaded download for {len(tasks)} assets from {start_date} to {end_date}...")
+            tasks.append((stock, category, start_date))
+
+    if incremental and skipped:
+        print(f"  Skipped {skipped} symbols already up to date.")
+    
+    if not tasks:
+        print("  All stocks are up to date. Nothing to ingest.")
+        return
+            
+    print(f"Starting multi-threaded download for {len(tasks)} assets (end: {end_date})...")
+
+    if dry_run:
+        print(f"\n  [DRY RUN] Would fetch data for {len(tasks)} symbols. No data will be written.")
+        return
     
     all_data = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
         future_to_stock = {
-            executor.submit(fetch_single_ticker, stock, cat, start_date, end_date): stock["symbol"]
-            for stock, cat in tasks
+            executor.submit(fetch_single_ticker, stock, cat, start, end_date): stock["symbol"]
+            for stock, cat, start in tasks
         }
         
         completed_count = 0
@@ -289,18 +348,31 @@ def fetch_and_upload():
         bigquery.SchemaField("volume", "INTEGER", mode="NULLABLE"),
     ]
     
-    table_ref = f"{PROJECT_ID}.{DATASET_ID}.{TABLE_ID}"
-    
+    if incremental:
+        # Dedup safety: remove any overlapping rows before appending
+        symbols_with_data = set(r["symbol"] for r in all_data)
+        for sym in symbols_with_data:
+            sym_rows = [r for r in all_data if r["symbol"] == sym]
+            min_date = min(r["trade_date"] for r in sym_rows)
+            delete_overlap_rows(client, table_ref, sym, min_date)
+        
+        write_mode = "WRITE_APPEND"
+    else:
+        write_mode = "WRITE_TRUNCATE"
+
     job_config = bigquery.LoadJobConfig(
         schema=schema,
-        write_disposition="WRITE_TRUNCATE",
+        write_disposition=write_mode,
     )
     
-    print(f"\nUploading {len(df_final):,} records to BigQuery table: {table_ref}...")
+    print(f"\nUploading {len(df_final):,} records to BigQuery table: {table_ref} ({write_mode})...")
     job = client.load_table_from_dataframe(df_final, table_ref, job_config=job_config)
     job.result()
     
     print(f"SUCCESS! Successfully loaded {job.output_rows:,} rows into {table_ref}.")
 
 if __name__ == "__main__":
-    fetch_and_upload()
+    import sys
+    is_incremental = "--incremental" in sys.argv
+    is_dry_run = "--dry-run" in sys.argv
+    fetch_and_upload(incremental=is_incremental, dry_run=is_dry_run)

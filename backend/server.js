@@ -660,6 +660,70 @@ app.get('/api/bigquery/macro-regime', async (req, res) => {
   }
 });
 
+// --- BigQuery Data Health / Freshness Endpoint ---
+app.get('/api/bigquery/data-health', async (req, res) => {
+  console.log('[BigQuery Data Health] Checking data freshness across all tables...');
+  try {
+    const accessToken = await getAccessToken(res);
+    if (!accessToken) return;
+
+    const healthQuery = `
+      WITH table_health AS (
+        SELECT 'market_regime_history' as table_name,
+          MAX(trade_date) as latest_date,
+          COUNT(*) as total_rows
+        FROM \`finwise-506509.finwise_data.market_regime_history\`
+        UNION ALL
+        SELECT 'individual_stock_history',
+          MAX(trade_date),
+          COUNT(*)
+        FROM \`finwise-506509.finwise_data.individual_stock_history\`
+        UNION ALL
+        SELECT 'macro_economic_indicators',
+          MAX(period_date),
+          COUNT(*)
+        FROM \`finwise-506509.finwise_data.macro_economic_indicators\`
+        UNION ALL
+        SELECT 'regime_summary',
+          MAX(data_end_date),
+          COUNT(*)
+        FROM \`finwise-506509.finwise_data.regime_summary\`
+      )
+      SELECT table_name, latest_date, total_rows,
+        DATE_DIFF(CURRENT_DATE(), latest_date, DAY) as days_stale
+      FROM table_health
+      ORDER BY days_stale DESC
+    `;
+
+    const rows = await executeBQQuery(accessToken, healthQuery);
+
+    const tables = rows.map(row => ({
+      table: row.table_name,
+      latestDate: row.latest_date,
+      totalRows: Number(row.total_rows),
+      daysStale: Number(row.days_stale),
+      isFresh: Number(row.days_stale) <= 3, // Fresh if within 3 days (weekends)
+    }));
+
+    const stalestTable = tables.reduce((a, b) => (a.daysStale > b.daysStale ? a : b), tables[0]);
+    const overallFresh = tables.every(t => t.isFresh);
+
+    console.log(`[BigQuery Data Health] Overall fresh: ${overallFresh}, Stalest: ${stalestTable?.table} (${stalestTable?.daysStale} days)`);
+
+    return res.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      overallFresh,
+      stalestTable: stalestTable?.table,
+      stalestDays: stalestTable?.daysStale,
+      tables,
+    });
+  } catch (error) {
+    console.error('[BigQuery Data Health] Error:', error);
+    return res.status(500).json({ error: error.message || 'Data health check failed' });
+  }
+});
+
 const server = app.listen(PORT, API_BACKEND_HOST, () => {
   console.log(`Vertex AI Backend listening at http://localhost:${PORT}`);
 });

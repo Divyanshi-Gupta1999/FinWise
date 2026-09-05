@@ -1,6 +1,9 @@
 # FinWise AI Agent Architecture
 
-While FinWise is powered by a single underlying Large Language Model (**Gemini 2.5 Flash**) acting under the persona of an "elite autonomous AI wealth advisor," the application orchestrates this model into **four distinct agentic workflows (or "Agents")**. 
+FinWise utilizes a **Hybrid Multi-Model Intelligence Architecture** orchestrated into **four distinct agentic workflows (or "Agents")**:
+- **Gemini 2.5 Pro**: Powers high-level macroeconomic strategy, causal risk reasoning, and crisis stress-testing.
+- **Gemini 2.5 Flash**: Delivers sub-second response times for interactive sector drill-downs and conversational advisory.
+- **Deterministic Math**: Pure quantitative mathematics (zero LLM hallucination) for probabilistic compounding projections.
 
 Each agent is responsible for a specific layer of financial reasoning. Here is the breakdown of the agents and their work:
 

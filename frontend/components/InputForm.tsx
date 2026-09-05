@@ -1,6 +1,6 @@
 import React from 'react';
 import { UserProfile } from '../types';
-import { DollarSign, TrendingUp, Target, Clock, ShieldAlert, Wallet, Flag } from 'lucide-react';
+import { DollarSign, TrendingUp, Target, Clock, ShieldAlert, Wallet, Flag, ChevronDown } from 'lucide-react';
 
 interface InputFormProps {
   profile: UserProfile;
@@ -30,123 +30,141 @@ const InputForm: React.FC<InputFormProps> = ({ profile, onChange, onSubmit, isLo
   const isSpecificMilestone = profile.objective === 'MILESTONE';
 
   return (
-    <div className="bg-gray-900 border-r border-gray-800 w-full md:w-80 p-6 flex flex-col h-full overflow-y-auto custom-scrollbar">
-      <div className="flex items-center gap-3 mb-8">
-        <div className="bg-emerald-500/20 p-2 rounded-lg">
-          <TrendingUp className="text-emerald-400 w-6 h-6" />
+    <div className="bg-slate-900/95 border-r border-slate-800/80 w-full md:w-80 p-6 flex flex-col h-full overflow-y-auto custom-scrollbar shadow-xl backdrop-blur-sm select-none">
+      <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-800/80">
+        <div className="bg-emerald-500/15 border border-emerald-500/30 p-2.5 rounded-xl shadow-inner flex-shrink-0">
+          <TrendingUp className="text-emerald-400 w-5 h-5" />
         </div>
-        <h1 className="text-2xl font-bold text-white tracking-tight">FinWise <span className="text-emerald-500">AI</span></h1>
+        <div>
+          <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-1.5 leading-tight">
+            FinWise <span className="text-emerald-400 font-semibold">AI</span>
+          </h1>
+          <p className="text-[11px] text-slate-400 font-mono tracking-tight mt-0.5">Institutional Wealth Advisor</p>
+        </div>
       </div>
 
-      <div className="space-y-5 flex-grow">
+      <div className="space-y-4 flex-grow">
         
         {/* Objective Selection */}
         <div>
-          <label className="flex items-center gap-2 text-sm font-medium text-gray-400 mb-2">
-            <Flag className="w-4 h-4" /> Investment Objective
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-300 mb-1.5 select-none">
+            <Flag className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            <span>Investment Objective</span>
           </label>
-          <select
-            name="objective"
-            value={profile.objective}
-            onChange={handleSelectChange}
-            className="w-full bg-gray-950 border border-gray-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors appearance-none"
-          >
-            <option value="MILESTONE">Specific Milestone (House, Car, etc.)</option>
-            <option value="FIRE">Long-Term Wealth Compounding / FIRE</option>
-            <option value="RETIREMENT">Retirement Corpus Planning</option>
-          </select>
+          <div className="relative flex items-center">
+            <select
+              name="objective"
+              value={profile.objective}
+              onChange={handleSelectChange}
+              className="w-full bg-slate-950/90 border border-slate-800 rounded-xl pl-3.5 pr-10 py-2.5 text-xs sm:text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all appearance-none cursor-pointer hover:border-slate-700 truncate"
+            >
+              <option value="MILESTONE">Specific Milestone (House, Car, etc.)</option>
+              <option value="FIRE">Long-Term Compounding / FIRE</option>
+              <option value="RETIREMENT">Retirement Corpus Planning</option>
+            </select>
+            <ChevronDown className="w-4 h-4 text-slate-400 pointer-events-none absolute right-3" />
+          </div>
         </div>
 
         {/* Risk Profile */}
         <div>
-          <label className="flex items-center gap-2 text-sm font-medium text-gray-400 mb-2">
-            <ShieldAlert className="w-4 h-4" /> Risk Tolerance Profile
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-300 mb-1.5 select-none">
+            <ShieldAlert className="w-4 h-4 text-amber-400 flex-shrink-0" />
+            <span>Risk Tolerance</span>
           </label>
-          <select
-            name="riskProfile"
-            value={profile.riskProfile}
-            onChange={handleSelectChange}
-            className="w-full bg-gray-950 border border-gray-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors appearance-none"
-          >
-            <option value="CONSERVATIVE">Conservative (Capital Preservation)</option>
-            <option value="MODERATE">Moderate (Balanced Growth)</option>
-            <option value="AGGRESSIVE">Aggressive (Max Equity Compounding)</option>
-          </select>
+          <div className="relative flex items-center">
+            <select
+              name="riskProfile"
+              value={profile.riskProfile}
+              onChange={handleSelectChange}
+              className="w-full bg-slate-950/90 border border-slate-800 rounded-xl pl-3.5 pr-10 py-2.5 text-xs sm:text-sm text-slate-100 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all appearance-none cursor-pointer hover:border-slate-700 truncate"
+            >
+              <option value="CONSERVATIVE">Conservative (Capital Preservation)</option>
+              <option value="MODERATE">Moderate (Balanced Growth)</option>
+              <option value="AGGRESSIVE">Aggressive (Max Equity Compounding)</option>
+            </select>
+            <ChevronDown className="w-4 h-4 text-slate-400 pointer-events-none absolute right-3" />
+          </div>
         </div>
 
-        <div className="pt-4 border-t border-gray-800"></div>
+        <div className="pt-2 border-t border-slate-800/80"></div>
 
         {/* Financials */}
         <div>
-          <label className="flex items-center gap-2 text-sm font-medium text-gray-400 mb-2">
-            <DollarSign className="w-4 h-4" /> Monthly Income ({currencySymbol})
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-300 mb-1.5 select-none">
+            <DollarSign className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+            <span>Monthly Income ({currencySymbol})</span>
           </label>
           <input
             type="number"
             name="income"
             value={profile.income || ''}
             onChange={handleNumberChange}
-            className="w-full bg-gray-950 border border-gray-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
-            placeholder="e.g. 8000"
+            className="w-full bg-slate-950/90 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm font-mono text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all hover:border-slate-700 tabular-nums"
+            placeholder="e.g. 150000"
           />
         </div>
 
         <div>
-          <label className="flex items-center gap-2 text-sm font-medium text-gray-400 mb-2">
-            <Wallet className="w-4 h-4" /> Fixed Expenses ({currencySymbol})
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-300 mb-1.5 select-none">
+            <Wallet className="w-4 h-4 text-blue-400 flex-shrink-0" />
+            <span>Fixed Expenses ({currencySymbol})</span>
           </label>
           <input
             type="number"
             name="expenses"
             value={profile.expenses || ''}
             onChange={handleNumberChange}
-            className="w-full bg-gray-950 border border-gray-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
-            placeholder="e.g. 4000"
+            className="w-full bg-slate-950/90 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm font-mono text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all hover:border-slate-700 tabular-nums"
+            placeholder="e.g. 60000"
           />
         </div>
 
         <div>
-          <label className="flex items-center gap-2 text-sm font-medium text-gray-400 mb-2">
-            <DollarSign className="w-4 h-4" /> Current Capital ({currencySymbol})
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-300 mb-1.5 select-none">
+            <DollarSign className="w-4 h-4 text-purple-400 flex-shrink-0" />
+            <span>Current Capital ({currencySymbol})</span>
           </label>
           <input
             type="number"
             name="capital"
             value={profile.capital || ''}
             onChange={handleNumberChange}
-            className="w-full bg-gray-950 border border-gray-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
-            placeholder="e.g. 50000"
+            className="w-full bg-slate-950/90 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm font-mono text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all hover:border-slate-700 tabular-nums"
+            placeholder="e.g. 500000"
           />
         </div>
 
         {/* Conditional Milestone Fields */}
         {isSpecificMilestone && (
-          <div className="space-y-5 animate-in slide-in-from-top-2 duration-300">
+          <div className="space-y-4 pt-1 animate-in slide-in-from-top-2 duration-300">
             <div>
-              <label className="flex items-center gap-2 text-sm font-medium text-gray-400 mb-2">
-                <Target className="w-4 h-4" /> Target Goal Amount ({currencySymbol})
+              <label className="flex items-center gap-2 text-xs font-semibold text-slate-300 mb-1.5 select-none">
+                <Target className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                <span>Target Goal ({currencySymbol})</span>
               </label>
               <input
                 type="number"
                 name="goalAmount"
                 value={profile.goalAmount || ''}
                 onChange={handleNumberChange}
-                className="w-full bg-gray-950 border border-gray-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
-                placeholder="e.g. 1000000"
+                className="w-full bg-slate-950/90 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm font-mono text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all hover:border-slate-700 tabular-nums"
+                placeholder="e.g. 2500000"
               />
             </div>
 
             <div>
-              <label className="flex items-center gap-2 text-sm font-medium text-gray-400 mb-2">
-                <Clock className="w-4 h-4" /> Goal Horizon (Years)
+              <label className="flex items-center gap-2 text-xs font-semibold text-slate-300 mb-1.5 select-none">
+                <Clock className="w-4 h-4 text-cyan-400 flex-shrink-0" />
+                <span>Goal Horizon (Years)</span>
               </label>
               <input
                 type="number"
                 name="goalHorizon"
                 value={profile.goalHorizon || ''}
                 onChange={handleNumberChange}
-                className="w-full bg-gray-950 border border-gray-800 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
-                placeholder="e.g. 10"
+                className="w-full bg-slate-950/90 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm font-mono text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 transition-all hover:border-slate-700 tabular-nums"
+                placeholder="e.g. 7"
               />
             </div>
           </div>
@@ -156,22 +174,22 @@ const InputForm: React.FC<InputFormProps> = ({ profile, onChange, onSubmit, isLo
       <button
         onClick={onSubmit}
         disabled={isLoading}
-        className={`mt-8 w-full py-3 px-4 rounded-lg font-semibold text-white transition-all duration-200 flex items-center justify-center gap-2 flex-shrink-0
+        className={`mt-6 w-full py-3 px-4 rounded-xl font-medium text-sm text-white transition-all duration-200 flex items-center justify-center gap-2 flex-shrink-0 shadow-sm active:scale-[0.99]
           ${isLoading 
-            ? 'bg-emerald-600/50 cursor-not-allowed' 
-            : 'bg-emerald-600 hover:bg-emerald-500 hover:shadow-[0_0_15px_rgba(16,185,129,0.4)]'
+            ? 'bg-emerald-700/60 cursor-wait' 
+            : 'bg-emerald-600 hover:bg-emerald-500'
           }`}
       >
         {isLoading ? (
           <>
-            <svg className="animate-spin -ml-1 mr-2 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <svg className="animate-spin -ml-1 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            Synthesizing...
+            <span className="font-medium">Synthesizing Strategy...</span>
           </>
         ) : (
-          'Generate Autonomous Plan'
+          <span className="font-medium">Generate Autonomous Plan</span>
         )}
       </button>
     </div>

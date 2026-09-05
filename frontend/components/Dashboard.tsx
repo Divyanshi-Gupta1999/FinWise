@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { UserProfile, AllocationData, Projection, CategoryRecommendation, SpecificAssetPick, MarketBenchmark, NarrativeData, MacroRegimeState } from '../types';
 import { getCategoryRecommendation, getSpecificAssetRecommendations } from '../services/geminiService';
+import { fetchDataHealth, DataHealthResponse } from '../services/bigqueryService';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell
 } from 'recharts';
-import { ShieldAlert, Target, TrendingUp, X, ChevronRight, Database, CheckCircle2, ArrowLeft, TrendingDown, Activity, Loader2, AlertTriangle, ListChecks, Globe, Gauge, Landmark, DollarSign } from 'lucide-react';
+import { ShieldAlert, Target, TrendingUp, X, ChevronRight, Database, CheckCircle2, ArrowLeft, TrendingDown, Activity, Loader2, AlertTriangle, ListChecks, Globe, Gauge, Landmark, DollarSign, Copy } from 'lucide-react';
 
 interface DashboardProps {
   profile: UserProfile;
@@ -20,8 +21,19 @@ interface DashboardProps {
   isGeneratingNarrative: boolean;
 }
 
-const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
-const SUB_COLORS = ['#34d399', '#60a5fa', '#fbbf24', '#f87171', '#a78bfa'];
+const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#06b6d4', '#8b5cf6', '#ec4899'];
+const SUB_COLORS = ['#34d399', '#60a5fa', '#fbbf24', '#22d3ee', '#a78bfa', '#f472b6'];
+
+export const getCategoryColor = (assetClass: string, index: number = 0): string => {
+  const lower = (assetClass || '').toLowerCase();
+  if (lower.includes('stock') || lower.includes('equit')) return '#10b981'; // Emerald
+  if (lower.includes('mutual') || lower.includes('etf') || lower.includes('index')) return '#3b82f6'; // Blue
+  if (lower.includes('gold') || lower.includes('silver') || lower.includes('metal')) return '#f59e0b'; // Amber Gold
+  if (lower.includes('bond') || lower.includes('gilt') || lower.includes('debt') || lower.includes('treasury')) return '#06b6d4'; // Cyan
+  if (lower.includes('fixed') || lower.includes('cash') || lower.includes('deposit') || lower.includes('liquid')) return '#8b5cf6'; // Violet
+  if (lower.includes('alt') || lower.includes('crypto') || lower.includes('growth')) return '#ec4899'; // Rose
+  return COLORS[index % COLORS.length];
+};
 
 const Dashboard: React.FC<DashboardProps> = ({ 
   profile, benchmarks, macroRegime, allocation, projections, narrativeData, 
@@ -35,56 +47,121 @@ const Dashboard: React.FC<DashboardProps> = ({
   const [selectedSubCategory, setSelectedSubCategory] = useState<string | null>(null);
   const [assetPicks, setAssetPicks] = useState<SpecificAssetPick[] | null>(null);
   const [isLoadingPicks, setIsLoadingPicks] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+  const [dataHealth, setDataHealth] = useState<DataHealthResponse | null>(null);
+
+  // In-session caches: avoid re-fetching the same category / sub-category data
+  const categoryRecCache = React.useRef<Map<string, CategoryRecommendation>>(new Map());
+  const assetPicksCache = React.useRef<Map<string, SpecificAssetPick[]>>(new Map());
+
+  // Track the latest requested keys to prevent stale API responses from overwriting current state
+  const latestCategoryRequest = React.useRef<string | null>(null);
+  const latestAssetPickRequest = React.useRef<string | null>(null);
   
   const currencySymbol = profile.market === 'US' ? '$' : '₹';
+
+  // Fetch data freshness when benchmarks become available
+  useEffect(() => {
+    if (benchmarks && benchmarks.length > 0) {
+      fetchDataHealth().then(health => {
+        if (health) setDataHealth(health);
+      });
+    }
+  }, [benchmarks]);
   
-  const formatCurrency = (value: number) => {
+  const formatCurrency = useCallback((value: number) => {
     if (value >= 10000000) return `${currencySymbol}${(value / 10000000).toFixed(2)}Cr`;
     if (value >= 1000000) return `${currencySymbol}${(value / 1000000).toFixed(1)}M`;
     if (value >= 100000) return `${currencySymbol}${(value / 100000).toFixed(1)}L`;
     if (value >= 1000) return `${currencySymbol}${(value / 1000).toFixed(0)}k`;
     return `${currencySymbol}${value}`;
-  };
+  }, [currencySymbol]);
 
-  const finalBase = projections ? projections[projections.length - 1]?.base || 0 : 0;
-  const goalReached = profile.objective === 'MILESTONE' ? finalBase >= profile.goalAmount : true;
+  const finalBase = useMemo(() => {
+    return projections && projections.length > 0 ? projections[projections.length - 1]?.base || 0 : 0;
+  }, [projections]);
+
+  const goalReached = useMemo(() => {
+    return profile.objective === 'MILESTONE' ? finalBase >= (profile.goalAmount || 0) : true;
+  }, [profile.objective, profile.goalAmount, finalBase]);
+
+  const handleCopyStrategy = useCallback(() => {
+    if (!narrativeData) return;
+    const textToCopy = `FinWise AI — Strategy Report\nRisk Score: ${allocation?.riskScore || 'N/A'}/100\nProjected Base Corpus: ${formatCurrency(finalBase)}\nObjective: ${profile.objective}\n\nSynthesis:\n${narrativeData.narrative}`;
+    navigator.clipboard.writeText(textToCopy);
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 2500);
+  }, [narrativeData, allocation, finalBase, formatCurrency, profile.objective]);
 
   const handleCategoryClick = async (data: any) => {
     const category = data.assetClass || data.name;
     if (!category || !benchmarks) return;
     
+    latestCategoryRequest.current = category;
     setSelectedCategory(category);
-    setIsLoadingRec(true);
-    setCategoryRec(null);
     setRecError(null);
     setSelectedSubCategory(null);
     setAssetPicks(null);
+
+    // Check cache first — return instantly if already fetched this session
+    const cached = categoryRecCache.current.get(category);
+    if (cached) {
+      setCategoryRec(cached);
+      setIsLoadingRec(false);
+      return;
+    }
+    
+    setIsLoadingRec(true);
+    setCategoryRec(null);
     
     try {
       const rec = await getCategoryRecommendation(category, profile, benchmarks);
-      setCategoryRec(rec);
+      // Only apply result if this is still the latest request (prevents stale overwrites)
+      if (latestCategoryRequest.current === category) {
+        setCategoryRec(rec);
+        setIsLoadingRec(false);
+      }
+      categoryRecCache.current.set(category, rec); // Always cache regardless
     } catch (err: any) {
-      setRecError(err.message || "Failed to load recommendation.");
-    } finally {
-      setIsLoadingRec(false);
+      if (latestCategoryRequest.current === category) {
+        setRecError(err.message || "Failed to load recommendation.");
+        setIsLoadingRec(false);
+      }
     }
   };
 
   const handleSubCategoryClick = async (subCategoryName: string) => {
     if (!selectedCategory) return;
-    
+
+    const cacheKey = `${selectedCategory}::${subCategoryName}`;
+    latestAssetPickRequest.current = cacheKey;
     setSelectedSubCategory(subCategoryName);
+
+    // Check cache first — return instantly if already fetched this session
+    const cached = assetPicksCache.current.get(cacheKey);
+    if (cached) {
+      setAssetPicks(cached);
+      setIsLoadingPicks(false);
+      return;
+    }
+    
     setIsLoadingPicks(true);
     setAssetPicks(null);
     
     try {
       const picks = await getSpecificAssetRecommendations(selectedCategory, subCategoryName, profile);
-      setAssetPicks(picks);
+      // Only apply result if this is still the latest request (prevents stale overwrites)
+      if (latestAssetPickRequest.current === cacheKey) {
+        setAssetPicks(picks);
+        setIsLoadingPicks(false);
+      }
+      assetPicksCache.current.set(cacheKey, picks); // Always cache regardless
     } catch (err: any) {
-      setRecError(err.message || "Failed to load specific asset picks.");
-      setSelectedSubCategory(null);
-    } finally {
-      setIsLoadingPicks(false);
+      if (latestAssetPickRequest.current === cacheKey) {
+        setRecError(err.message || "Failed to load specific asset picks.");
+        setSelectedSubCategory(null);
+        setIsLoadingPicks(false);
+      }
     }
   };
 
@@ -99,70 +176,78 @@ const Dashboard: React.FC<DashboardProps> = ({
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-500 relative">
       
-      {/* Header */}
-      <div className="flex justify-between items-end mb-2">
+      {/* Dashboard Title */}
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-2">
         <div>
-          <h2 className="text-2xl font-bold text-white flex items-center gap-3">
+          <h2 className="text-xl font-bold text-white flex items-center gap-3">
             Strategy Dashboard
             {(isFetchingBQ || isGeneratingAllocation || isGeneratingProjections || isGeneratingNarrative) && (
-              <span className="flex items-center gap-1 text-xs font-medium bg-emerald-500/20 text-emerald-400 px-2 py-1 rounded-full">
-                <Loader2 className="w-3 h-3 animate-spin" /> Agents Working...
+              <span className="flex items-center gap-1.5 text-xs font-medium text-slate-400 bg-slate-800/80 px-2.5 py-1 rounded-full border border-slate-700">
+                <Loader2 className="w-3 h-3 text-emerald-400 animate-spin" /> Synthesizing Strategy...
               </span>
             )}
           </h2>
-          <p className="text-gray-400 text-sm">AI-generated based on your profile and market conditions.</p>
-        </div>
-        <div className="flex items-center gap-2 bg-blue-900/20 border border-blue-800/50 px-3 py-1.5 rounded-full">
-          <Database className="w-4 h-4 text-blue-400" />
-          <span className="text-xs font-medium text-blue-300">Live BigQuery Data</span>
+          <p className="text-slate-400 text-xs mt-0.5">Autonomous quantitative allocation grounded in 725,000+ BigQuery records.</p>
         </div>
       </div>
 
-      {/* BigQuery Market Intelligence Panel */}
-      <div className="bg-gray-900 border border-blue-900/50 rounded-xl overflow-hidden">
-        <div className="bg-blue-950/30 px-6 py-4 border-b border-blue-900/50 flex items-center justify-between">
+      {/* Top Banner: BigQuery Live Market Intelligence */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl overflow-hidden shadow-sm backdrop-blur-sm">
+        <div className="bg-slate-950/80 px-6 py-3.5 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="bg-blue-500/20 p-2 rounded-lg">
-              <Database className="w-5 h-5 text-blue-400" />
+            <div className="bg-slate-800/80 p-2 rounded-xl border border-slate-700/60">
+              <Database className="w-4 h-4 text-blue-400" />
             </div>
             <div>
-              <h3 className="text-white font-semibold flex items-center gap-2">
+              <h3 className="text-white font-semibold flex items-center gap-2 text-sm">
                 Real-Time Market Intelligence
-                <span className="text-[10px] uppercase tracking-wider bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded">Live BigQuery</span>
-                <span className="text-[10px] uppercase tracking-wider bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded">660,000+ Records (20Y Depth)</span>
+                <span className="text-[10px] text-blue-300 font-mono bg-blue-950/60 px-2 py-0.5 rounded-md border border-blue-800/40">Live BigQuery</span>
+                <span className="text-[10px] text-emerald-300 font-mono bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-800/40">725,000+ Records</span>
               </h3>
-              <p className="text-xs text-blue-300/70 font-mono mt-0.5">finwise-506509.finwise_data | 5 parallel SQL queries | Multi-Asset Global Intelligence</p>
+              <p className="text-[11px] text-slate-400 font-mono mt-0.5">finwise-506509.finwise_data • 5 Parallel Analytics Queries • Multi-Asset Coverage</p>
             </div>
           </div>
+          {dataHealth && (
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-[11px] font-mono ${
+              dataHealth.overallFresh 
+                ? 'bg-emerald-950/40 border-emerald-800/40 text-emerald-300'
+                : dataHealth.stalestDays <= 7
+                  ? 'bg-amber-950/40 border-amber-800/40 text-amber-300'
+                  : 'bg-red-950/40 border-red-800/40 text-red-300'
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${dataHealth.overallFresh ? 'bg-emerald-400' : dataHealth.stalestDays <= 7 ? 'bg-amber-400' : 'bg-red-400'} animate-pulse`} />
+              Data as of: {dataHealth.tables?.[0]?.latestDate ? new Date(dataHealth.tables.reduce((a, b) => a.daysStale < b.daysStale ? a : b).latestDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Unknown'}
+            </div>
+          )}
         </div>
         
         <div className="p-6 overflow-x-auto">
           {isFetchingBQ || !benchmarks ? (
             <div className="flex flex-col items-center justify-center py-8 space-y-3">
-              <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
-              <p className="text-sm text-blue-400 animate-pulse">Running 5 parallel BigQuery analytical queries on 30+ years of market data...</p>
+              <Loader2 className="w-6 h-6 text-blue-400 animate-spin" />
+              <p className="text-xs text-slate-400 font-medium">Running 5 parallel BigQuery analytical queries on 40+ years of market data...</p>
             </div>
           ) : (
             <>
               {/* Current Market Regime Cards */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
                 {benchmarks.map((bm, idx) => (
-                  <div key={idx} className="bg-gray-950 border border-gray-800 rounded-lg p-4">
-                    <p className="text-xs text-gray-500 font-medium truncate mb-1">{bm.assetClass.split('(')[0].trim()}</p>
+                  <div key={idx} className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-3.5 hover:border-slate-700 transition-all">
+                    <p className="text-xs text-slate-400 font-medium truncate mb-1">{bm.assetClass.split('(')[0].trim()}</p>
                     {bm.currentPrice ? (
                       <>
-                        <p className="text-lg font-bold text-white font-mono">{bm.currentPrice.toLocaleString()}</p>
+                        <p className="text-base font-semibold text-white font-mono tabular-nums">{bm.currentPrice.toLocaleString()}</p>
                         <div className="flex items-center gap-2 mt-1">
-                          <span className={`text-xs font-mono font-medium px-1.5 py-0.5 rounded ${(bm.return1Y || 0) >= 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
+                          <span className={`text-[11px] font-mono font-medium px-1.5 py-0.5 rounded tabular-nums ${(bm.return1Y || 0) >= 0 ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'}`}>
                             {(bm.return1Y || 0) >= 0 ? '▲' : '▼'} {bm.return1Y}% 1Y
                           </span>
-                          <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${(bm.momentum30d || 0) > 30 ? 'bg-emerald-500/10 text-emerald-500' : (bm.momentum30d || 0) < -10 ? 'bg-red-500/10 text-red-500' : 'bg-amber-500/10 text-amber-400'}`}>
+                          <span className={`text-[11px] font-mono px-1.5 py-0.5 rounded tabular-nums ${(bm.momentum30d || 0) > 30 ? 'bg-emerald-950 text-emerald-300' : (bm.momentum30d || 0) < -10 ? 'bg-red-950 text-red-300' : 'bg-slate-800 text-white'}`}>
                             {(bm.momentum30d || 0) > 0 ? '+' : ''}{bm.momentum30d?.toFixed(0)}% 30D
                           </span>
                         </div>
                       </>
                     ) : (
-                      <p className="text-lg font-bold text-white font-mono">{bm.cagr30Y}% CAGR</p>
+                      <p className="text-base font-semibold text-white font-mono tabular-nums">{bm.cagr30Y}% CAGR</p>
                     )}
                   </div>
                 ))}
@@ -172,25 +257,25 @@ const Dashboard: React.FC<DashboardProps> = ({
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr>
-                    <th className="pb-3 text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-800">Asset Class</th>
-                    <th className="pb-3 text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-800">30Y CAGR</th>
-                    <th className="pb-3 text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-800">Volatility (σ)</th>
-                    <th className="pb-3 text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-800">Max Drawdown</th>
-                    <th className="pb-3 text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-800">Current Regime</th>
-                    <th className="pb-3 text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-800">Data Coverage</th>
+                    <th className="pb-2.5 text-xs font-medium text-slate-400 uppercase tracking-wider border-b border-slate-800">Asset Class</th>
+                    <th className="pb-2.5 text-xs font-medium text-slate-400 uppercase tracking-wider border-b border-slate-800">30Y CAGR</th>
+                    <th className="pb-2.5 text-xs font-medium text-slate-400 uppercase tracking-wider border-b border-slate-800">Volatility (σ)</th>
+                    <th className="pb-2.5 text-xs font-medium text-slate-400 uppercase tracking-wider border-b border-slate-800">Max Drawdown</th>
+                    <th className="pb-2.5 text-xs font-medium text-slate-400 uppercase tracking-wider border-b border-slate-800">Current Valuation</th>
+                    <th className="pb-2.5 text-xs font-medium text-slate-400 uppercase tracking-wider border-b border-slate-800">Data Coverage</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-800/50">
+                <tbody className="divide-y divide-slate-800/60 text-xs">
                   {benchmarks.map((bm, idx) => (
-                    <tr key={idx} className="hover:bg-gray-800/30 transition-colors">
-                      <td className="py-3 text-sm font-medium text-gray-200">{bm.assetClass}</td>
-                      <td className="py-3 text-sm text-emerald-400 font-mono">{bm.cagr30Y}%</td>
-                      <td className="py-3 text-sm text-amber-400 font-mono">{bm.volatility_std}%</td>
-                      <td className="py-3 text-sm text-red-400 font-mono">{bm.maxDrawdown}</td>
-                      <td className="py-3 text-sm text-gray-300">{bm.currentValuation}</td>
-                      <td className="py-3 text-xs text-gray-500 font-mono">
+                    <tr key={idx} className="hover:bg-slate-800/20 transition-colors">
+                      <td className="py-2.5 font-medium text-slate-200">{bm.assetClass}</td>
+                      <td className="py-2.5 text-emerald-400 font-mono font-medium tabular-nums">{bm.cagr30Y}%</td>
+                      <td className="py-2.5 text-amber-400 font-mono font-medium tabular-nums">{bm.volatility_std}%</td>
+                      <td className="py-2.5 text-red-400 font-mono font-medium tabular-nums">{bm.maxDrawdown}</td>
+                      <td className="py-2.5 text-slate-300">{bm.currentValuation}</td>
+                      <td className="py-2.5 text-slate-400 font-mono tabular-nums">
                         {bm.dataStartDate && bm.dataStartDate !== 'N/A' ? `${bm.dataStartDate} → ${bm.dataEndDate}` : 'N/A'}
-                        {bm.totalTradingDays ? <span className="text-gray-600 ml-1">({bm.totalTradingDays.toLocaleString()} days)</span> : null}
+                        {bm.totalTradingDays ? <span className="text-slate-500 ml-1">({bm.totalTradingDays.toLocaleString()} days)</span> : null}
                       </td>
                     </tr>
                   ))}
@@ -203,60 +288,60 @@ const Dashboard: React.FC<DashboardProps> = ({
 
       {/* Macroeconomic & Rate Cycle Pulse Bar */}
       {macroRegime && (
-        <div className="bg-gray-900/90 border border-purple-900/40 rounded-xl p-4 animate-in fade-in duration-500">
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-3 border-b border-gray-800/80 pb-3">
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 shadow-sm backdrop-blur-sm animate-in fade-in duration-500">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-3 border-b border-slate-800/80 pb-2.5">
             <div className="flex items-center gap-2.5">
-              <div className="bg-purple-500/20 p-1.5 rounded-lg">
-                <Globe className="w-4 h-4 text-purple-400" />
+              <div className="bg-slate-800/80 border border-slate-700/60 p-1.5 rounded-lg">
+                <Globe className="w-4 h-4 text-slate-300" />
               </div>
               <div>
-                <span className="text-xs text-gray-400 font-medium uppercase tracking-wider block">Detected Macro Regime</span>
-                <span className="text-sm font-semibold text-white flex items-center gap-2">
+                <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wider block">Detected Macro Regime</span>
+                <span className="text-xs sm:text-sm font-semibold text-white flex items-center gap-2">
                   {macroRegime.title}
-                  <span className="text-[10px] px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono">{macroRegime.badge}</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono border border-slate-700 font-medium">{macroRegime.badge}</span>
                 </span>
               </div>
             </div>
             <div className="text-right">
-              <span className="text-xs text-gray-500 font-mono">Live Central Bank & Economic Pulse</span>
+              <span className="text-[11px] text-slate-500 font-mono">Live Central Bank & Macro Pulse</span>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
-            <div className="bg-gray-950/80 border border-gray-800/80 rounded-lg p-2.5">
-              <span className="text-[11px] text-gray-400 block mb-0.5">CPI Inflation</span>
-              <span className="text-sm font-bold font-mono text-emerald-400">{macroRegime.cpiInflation}</span>
-              <span className="text-[10px] text-gray-500 block">YoY Trajectory</span>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2.5">
+            <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-2.5 hover:border-slate-700 transition-all">
+              <span className="text-[10px] text-slate-400 font-medium block mb-0.5">CPI Inflation</span>
+              <span className="text-sm font-semibold font-mono text-emerald-400 tabular-nums">{macroRegime.cpiInflation}</span>
+              <span className="text-[10px] text-slate-500 block mt-0.5">YoY Trajectory</span>
             </div>
 
-            <div className="bg-gray-950/80 border border-gray-800/80 rounded-lg p-2.5">
-              <span className="text-[11px] text-gray-400 block mb-0.5">Policy Rate</span>
-              <span className="text-sm font-bold font-mono text-blue-400">{macroRegime.fedFundsRate}</span>
-              <span className="text-[10px] text-gray-500 block">Central Bank</span>
+            <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-2.5 hover:border-slate-700 transition-all">
+              <span className="text-[10px] text-slate-400 font-medium block mb-0.5">Policy Rate</span>
+              <span className="text-sm font-semibold font-mono text-blue-400 tabular-nums">{macroRegime.fedFundsRate}</span>
+              <span className="text-[10px] text-slate-500 block mt-0.5">Central Bank</span>
             </div>
 
-            <div className="bg-gray-950/80 border border-gray-800/80 rounded-lg p-2.5">
-              <span className="text-[11px] text-gray-400 block mb-0.5">Yield Curve (10Y-2Y)</span>
-              <span className="text-sm font-bold font-mono text-emerald-400">{macroRegime.yieldCurveSpread}</span>
-              <span className="text-[10px] text-gray-500 truncate block">{macroRegime.yieldCurveStatus.split('(')[0]}</span>
+            <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-2.5 hover:border-slate-700 transition-all">
+              <span className="text-[10px] text-slate-400 font-medium block mb-0.5">Yield Spread (10Y-2Y)</span>
+              <span className="text-sm font-semibold font-mono text-emerald-400 tabular-nums">{macroRegime.yieldCurveSpread}</span>
+              <span className="text-[10px] text-slate-500 truncate block mt-0.5">{macroRegime.yieldCurveStatus.split('(')[0]}</span>
             </div>
 
-            <div className="bg-gray-950/80 border border-gray-800/80 rounded-lg p-2.5">
-              <span className="text-[11px] text-gray-400 block mb-0.5">VIX (Market Fear)</span>
-              <span className="text-sm font-bold font-mono text-amber-400">{macroRegime.vixIndex}</span>
-              <span className="text-[10px] text-gray-500 block">{Number(macroRegime.vixIndex) < 15 ? '🟢 Calm' : Number(macroRegime.vixIndex) < 25 ? '🟡 Normal' : '🔴 Panic'}</span>
+            <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-2.5 hover:border-slate-700 transition-all">
+              <span className="text-[10px] text-slate-400 font-medium block mb-0.5">VIX (Market Fear)</span>
+              <span className="text-sm font-semibold font-mono text-amber-400 tabular-nums">{macroRegime.vixIndex}</span>
+              <span className="text-[10px] text-slate-500 block mt-0.5">{Number(macroRegime.vixIndex) < 15 ? '🟢 Calm' : Number(macroRegime.vixIndex) < 25 ? '🟡 Normal' : '🔴 Panic'}</span>
             </div>
 
-            <div className="bg-gray-950/80 border border-gray-800/80 rounded-lg p-2.5">
-              <span className="text-[11px] text-gray-400 block mb-0.5">USD / INR</span>
-              <span className="text-sm font-bold font-mono text-white">{macroRegime.usdInrRate}</span>
-              <span className="text-[10px] text-gray-500 block">Exchange Rate</span>
+            <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-2.5 hover:border-slate-700 transition-all">
+              <span className="text-[10px] text-slate-400 font-medium block mb-0.5">USD / INR</span>
+              <span className="text-sm font-semibold font-mono text-slate-200 tabular-nums">{macroRegime.usdInrRate}</span>
+              <span className="text-[10px] text-slate-500 block mt-0.5">Exchange Rate</span>
             </div>
 
-            <div className="bg-gray-950/80 border border-gray-800/80 rounded-lg p-2.5">
-              <span className="text-[11px] text-gray-400 block mb-0.5">Unemployment</span>
-              <span className="text-sm font-bold font-mono text-white">{macroRegime.unemploymentRate}</span>
-              <span className="text-[10px] text-gray-500 block">Labor Market</span>
+            <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-2.5 hover:border-slate-700 transition-all">
+              <span className="text-[10px] text-slate-400 font-medium block mb-0.5">Unemployment</span>
+              <span className="text-sm font-semibold font-mono text-slate-200 tabular-nums">{macroRegime.unemploymentRate}</span>
+              <span className="text-[10px] text-slate-500 block mt-0.5">Labor Market</span>
             </div>
           </div>
         </div>
@@ -264,46 +349,57 @@ const Dashboard: React.FC<DashboardProps> = ({
 
       {/* Top Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 flex items-center gap-4">
-          <div className="bg-blue-500/20 p-3 rounded-lg">
-            <ShieldAlert className="text-blue-400 w-6 h-6" />
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4.5 flex items-center gap-3.5 shadow-sm backdrop-blur-sm hover:border-slate-700 transition-all">
+          <div className="bg-blue-500/10 border border-blue-500/20 p-2.5 rounded-xl">
+            <ShieldAlert className="text-blue-400 w-5 h-5" />
           </div>
           <div className="flex-1">
-            <p className="text-sm text-gray-400 font-medium">AI Risk Score</p>
+            <p className="text-xs text-slate-400 font-medium">AI Risk Score</p>
             {isGeneratingAllocation ? (
-              <div className="h-8 w-16 bg-gray-800 rounded animate-pulse mt-1"></div>
+              <div className="h-7 w-16 bg-slate-800 rounded animate-pulse mt-1"></div>
             ) : (
-              <p className="text-2xl font-bold text-white">{allocation?.riskScore} <span className="text-sm text-gray-500 font-normal">/ 100</span></p>
+              <p className="text-xl font-semibold text-white font-mono tabular-nums mt-0.5">{allocation?.riskScore} <span className="text-xs text-slate-400 font-normal">/ 100</span></p>
             )}
           </div>
         </div>
         
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 flex items-center gap-4">
-          <div className="bg-emerald-500/20 p-3 rounded-lg">
-            <TrendingUp className="text-emerald-400 w-6 h-6" />
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4.5 flex items-center gap-3.5 shadow-sm backdrop-blur-sm hover:border-slate-700 transition-all">
+          <div className="bg-emerald-500/10 border border-emerald-500/20 p-2.5 rounded-xl">
+            <TrendingUp className="text-emerald-400 w-5 h-5" />
           </div>
           <div className="flex-1">
-            <p className="text-sm text-gray-400 font-medium">Projected Base (End)</p>
+            <p className="text-xs text-slate-400 font-medium">Projected Base (End)</p>
             {isGeneratingProjections ? (
-              <div className="h-8 w-24 bg-gray-800 rounded animate-pulse mt-1"></div>
+              <div className="h-7 w-24 bg-slate-800 rounded animate-pulse mt-1"></div>
             ) : (
-              <p className="text-2xl font-bold text-white">{formatCurrency(finalBase)}</p>
+              <p className="text-xl font-semibold text-white font-mono tabular-nums mt-0.5">{formatCurrency(finalBase)}</p>
             )}
           </div>
         </div>
 
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 flex items-center gap-4">
-          <div className={`${goalReached && !isGeneratingProjections ? 'bg-emerald-500/20' : 'bg-amber-500/20'} p-3 rounded-lg`}>
-            <Target className={`${goalReached && !isGeneratingProjections ? 'text-emerald-400' : 'text-amber-400'} w-6 h-6`} />
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4.5 flex items-center gap-3.5 shadow-sm backdrop-blur-sm hover:border-slate-700 transition-all">
+          <div className={`${goalReached && !isGeneratingProjections ? 'bg-emerald-500/10 border border-emerald-500/20' : 'bg-amber-500/10 border border-amber-500/20'} p-2.5 rounded-xl`}>
+            <Target className={`${goalReached && !isGeneratingProjections ? 'text-emerald-400' : 'text-amber-400'} w-5 h-5`} />
           </div>
           <div className="flex-1">
-            <p className="text-sm text-gray-400 font-medium">Objective Status</p>
+            <p className="text-xs text-slate-400 font-medium">Objective Status</p>
             {isGeneratingProjections ? (
-              <div className="h-8 w-20 bg-gray-800 rounded animate-pulse mt-1"></div>
+              <div className="h-7 w-20 bg-slate-800 rounded animate-pulse mt-1"></div>
             ) : (
-              <p className={`text-2xl font-bold ${goalReached ? 'text-emerald-400' : 'text-amber-400'}`}>
-                {profile.objective === 'MILESTONE' ? (goalReached ? 'On Track' : 'Shortfall') : 'Compounding'}
-              </p>
+              <div>
+                <p className={`text-xl font-semibold tracking-tight mt-0.5 ${goalReached ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {profile.objective === 'MILESTONE' ? (goalReached ? 'On Track' : 'Shortfall') : 'Compounding'}
+                </p>
+                {profile.objective === 'MILESTONE' && profile.goalAmount ? (
+                  <span className="text-[11px] text-slate-400 font-mono tabular-nums block mt-0.5">
+                    {goalReached ? `Surplus: +${formatCurrency(finalBase - profile.goalAmount)}` : `Need: +${formatCurrency(profile.goalAmount - finalBase)}`}
+                  </span>
+                ) : profile.capital && profile.capital > 0 ? (
+                  <span className="text-[11px] text-slate-400 font-mono tabular-nums block mt-0.5">
+                    {`${(finalBase / profile.capital).toFixed(1)}x Growth Multiple`}
+                  </span>
+                ) : null}
+              </div>
             )}
           </div>
         </div>
@@ -313,19 +409,19 @@ const Dashboard: React.FC<DashboardProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* Asset Allocation Pie Chart */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 lg:col-span-1 flex flex-col">
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 lg:col-span-1 flex flex-col shadow-xl backdrop-blur-sm">
           <div className="flex justify-between items-start mb-1">
-            <h3 className="text-lg font-semibold text-white">Dynamic Asset Allocation</h3>
-            {isGeneratingAllocation && <Loader2 className="w-4 h-4 text-emerald-500 animate-spin" />}
+            <h3 className="text-base font-bold text-white tracking-tight">Dynamic Asset Allocation</h3>
+            {isGeneratingAllocation && <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />}
           </div>
-          <p className="text-xs text-gray-400 mb-4">Click on any category for a deep dive</p>
+          <p className="text-xs text-slate-400 mb-4">Click on any category for real-time sub-asset analysis</p>
           
           {isGeneratingAllocation || !allocation ? (
             <div className="flex-grow flex flex-col items-center justify-center min-h-[250px] space-y-6">
-              <div className="w-40 h-40 rounded-full border-8 border-gray-800 border-t-emerald-500/50 animate-spin"></div>
-              <div className="w-full space-y-3">
+              <div className="w-36 h-36 rounded-full border-4 border-slate-800 border-t-emerald-400 animate-spin"></div>
+              <div className="w-full space-y-2.5">
                 {[1, 2, 3].map(i => (
-                  <div key={i} className="h-8 w-full bg-gray-800 rounded animate-pulse"></div>
+                  <div key={i} className="h-8 w-full bg-slate-800/80 rounded-xl animate-pulse"></div>
                 ))}
               </div>
             </div>
@@ -348,12 +444,12 @@ const Dashboard: React.FC<DashboardProps> = ({
                       className="cursor-pointer hover:opacity-80 transition-opacity outline-none"
                     >
                       {allocation.assetAllocation.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        <Cell key={`cell-${index}`} fill={getCategoryColor(entry.assetClass, index)} />
                       ))}
                     </Pie>
                     <Tooltip 
-                      contentStyle={{ backgroundColor: '#1f2937', borderColor: '#374151', color: '#f3f4f6', borderRadius: '0.5rem' }}
-                      itemStyle={{ color: '#f3f4f6' }}
+                      contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc', borderRadius: '0.75rem' }}
+                      itemStyle={{ color: '#f8fafc' }}
                       formatter={(value: number) => [`${value}%`, 'Allocation']}
                     />
                   </PieChart>
@@ -363,16 +459,16 @@ const Dashboard: React.FC<DashboardProps> = ({
                 {allocation.assetAllocation.map((asset, idx) => (
                   <div 
                     key={idx} 
-                    className="flex items-center justify-between text-sm p-2 rounded-lg hover:bg-gray-800 cursor-pointer transition-colors"
+                    className="flex items-center justify-between text-sm p-2.5 rounded-xl hover:bg-slate-800/80 cursor-pointer transition-all border border-transparent hover:border-slate-700/60 active:scale-[0.99]"
                     onClick={() => handleCategoryClick(asset)}
                   >
-                    <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }}></div>
-                      <span className="text-gray-300">{asset.assetClass}</span>
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-3 h-3 rounded-full shadow-sm" style={{ backgroundColor: getCategoryColor(asset.assetClass, idx) }}></div>
+                      <span className="text-slate-200 font-medium text-xs">{asset.assetClass}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="font-medium text-white">{asset.percentage}%</span>
-                      <ChevronRight className="w-4 h-4 text-gray-500" />
+                      <span className="font-bold text-white font-mono text-xs tabular-nums">{asset.percentage}%</span>
+                      <ChevronRight className="w-4 h-4 text-slate-500" />
                     </div>
                   </div>
                 ))}
@@ -382,41 +478,43 @@ const Dashboard: React.FC<DashboardProps> = ({
         </div>
 
         {/* Probabilistic Outcome Curves */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 lg:col-span-2 flex flex-col">
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 lg:col-span-2 flex flex-col shadow-xl backdrop-blur-sm">
           <div className="flex justify-between items-start mb-4">
-            <h3 className="text-lg font-semibold text-white">Probabilistic Outcome Curves</h3>
-            {isGeneratingProjections && <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />}
+            <div>
+              <h3 className="text-base font-bold text-white tracking-tight">Probabilistic Outcome Curves</h3>
+              <p className="text-xs text-slate-400 mt-0.5">Monte Carlo compounding percentiles (Bull, Base, Bear) over investment horizon</p>
+            </div>
+            {isGeneratingProjections && <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />}
           </div>
           
           {isGeneratingProjections || !projections ? (
-            <div className="flex-grow flex items-end justify-between min-h-[300px] pb-8 px-4 gap-2">
-              {[...Array(10)].map((_, i) => (
-                <div key={i} className="w-full bg-gray-800 rounded-t animate-pulse" style={{ height: `${20 + Math.random() * 60}%`, animationDelay: `${i * 100}ms` }}></div>
-              ))}
+            <div className="flex-grow flex flex-col items-center justify-center min-h-[300px] space-y-4">
+              <div className="w-40 h-40 rounded-full border-4 border-slate-800 border-t-blue-400 animate-spin"></div>
+              <p className="text-sm text-slate-400 animate-pulse font-medium">Running deterministic compounding math...</p>
             </div>
           ) : (
-            <div className="flex-grow min-h-[300px] animate-in fade-in duration-500">
+            <div className="flex-grow min-h-[300px]">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={projections} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                   <XAxis 
                     dataKey="year" 
-                    stroke="#9ca3af" 
-                    tick={{ fill: '#9ca3af' }} 
+                    stroke="#64748b" 
+                    tick={{ fill: '#64748b', fontSize: 12 }} 
                     tickFormatter={(val) => `Yr ${val}`}
                   />
                   <YAxis 
-                    stroke="#9ca3af" 
-                    tick={{ fill: '#9ca3af' }}
+                    stroke="#64748b" 
+                    tick={{ fill: '#64748b', fontSize: 12 }}
                     tickFormatter={formatCurrency}
                   />
                   <Tooltip 
-                    contentStyle={{ backgroundColor: '#1f2937', borderColor: '#374151', color: '#f3f4f6', borderRadius: '0.5rem' }}
+                    contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc', borderRadius: '0.75rem' }}
                     formatter={(value: number) => [formatCurrency(value), '']}
                     labelFormatter={(label) => `Year ${label}`}
                   />
-                  <Legend wrapperStyle={{ paddingTop: '20px' }} />
-                  <Line type="monotone" dataKey="bull" name="Bull Case (90th %ile)" stroke="#10b981" strokeWidth={2} dot={false} />
+                  <Legend wrapperStyle={{ paddingTop: '16px', fontSize: '12px' }} />
+                  <Line type="monotone" dataKey="bull" name="Bull Case (90th %ile)" stroke="#10b981" strokeWidth={2.5} dot={false} />
                   <Line type="monotone" dataKey="base" name="Base Case (50th %ile)" stroke="#3b82f6" strokeWidth={3} dot={false} />
                   <Line type="monotone" dataKey="bear" name="Bear Case (10th %ile)" stroke="#ef4444" strokeWidth={2} dot={false} strokeDasharray="5 5" />
                 </LineChart>
@@ -430,29 +528,29 @@ const Dashboard: React.FC<DashboardProps> = ({
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
         {/* Action Steps */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl backdrop-blur-sm">
           <div className="flex justify-between items-start mb-4">
-            <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+            <h3 className="text-base font-bold text-white flex items-center gap-2 tracking-tight">
               <ListChecks className="w-5 h-5 text-emerald-400" />
               Prioritized Action Steps
             </h3>
-            {isGeneratingAllocation && <Loader2 className="w-4 h-4 text-emerald-500 animate-spin" />}
+            {isGeneratingAllocation && <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />}
           </div>
           
           {isGeneratingAllocation || !allocation ? (
             <div className="space-y-4">
               {[1, 2, 3].map(i => (
-                <div key={i} className="h-12 w-full bg-gray-800 rounded-lg animate-pulse"></div>
+                <div key={i} className="h-12 w-full bg-slate-800/80 rounded-xl animate-pulse"></div>
               ))}
             </div>
           ) : (
             <div className="space-y-3 animate-in fade-in duration-500">
               {allocation.actionSteps.map((step, idx) => (
-                <div key={idx} className="flex gap-3 items-start bg-gray-950 p-4 rounded-lg border border-gray-800">
-                  <div className="bg-emerald-500/20 text-emerald-400 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold mt-0.5">
+                <div key={idx} className="flex gap-3 items-start bg-slate-950/80 p-4 rounded-xl border border-slate-800/80 hover:border-slate-700 transition-all">
+                  <div className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold mt-0.5 shadow-inner">
                     {idx + 1}
                   </div>
-                  <p className="text-sm text-gray-300 leading-relaxed">{step}</p>
+                  <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">{step}</p>
                 </div>
               ))}
             </div>
@@ -460,33 +558,33 @@ const Dashboard: React.FC<DashboardProps> = ({
         </div>
 
         {/* 30-Year Regime Analysis */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl backdrop-blur-sm">
           <div className="flex justify-between items-start mb-4">
-            <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+            <h3 className="text-base font-bold text-white flex items-center gap-2 tracking-tight">
               <AlertTriangle className="w-5 h-5 text-amber-400" />
-              30-Year Macro Regime Analysis
+              Historical Crisis Stress Testing
             </h3>
-            {isGeneratingNarrative && <Loader2 className="w-4 h-4 text-amber-500 animate-spin" />}
+            {isGeneratingNarrative && <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />}
           </div>
           
           {isGeneratingNarrative || !narrativeData ? (
             <div className="space-y-4">
-              <div className="h-16 w-full bg-gray-800 rounded-lg animate-pulse"></div>
-              <div className="h-24 w-full bg-gray-800 rounded-lg animate-pulse"></div>
+              <div className="h-16 w-full bg-slate-800/80 rounded-xl animate-pulse"></div>
+              <div className="h-24 w-full bg-slate-800/80 rounded-xl animate-pulse"></div>
             </div>
           ) : (
             <div className="space-y-4 animate-in fade-in duration-500">
-              <p className="text-sm text-gray-300 leading-relaxed bg-gray-950 p-4 rounded-lg border border-gray-800">
+              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed bg-slate-950/80 p-4 rounded-xl border border-slate-800/80">
                 {narrativeData.regimeAnalysis.summary}
               </p>
               <div className="space-y-2">
-                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Historical Stress Tests</h4>
+                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Crisis Survival Metrics</h4>
                 {narrativeData.regimeAnalysis.historicalEvents.map((event, idx) => (
-                  <div key={idx} className="flex justify-between items-center bg-gray-850 p-3 rounded-lg border border-gray-800/50">
-                    <span className="text-sm font-medium text-white">{event.eventName}</span>
+                  <div key={idx} className="flex justify-between items-center bg-slate-950/80 p-3.5 rounded-xl border border-slate-800/80 hover:border-slate-700 transition-all">
+                    <span className="text-xs sm:text-sm font-semibold text-white">{event.eventName}</span>
                     <div className="text-right">
-                      <span className="text-red-400 text-sm font-mono block">{event.impact}</span>
-                      <span className="text-xs text-gray-500">Recovery: {event.recoveryTime}</span>
+                      <span className="text-red-400 text-xs sm:text-sm font-mono font-bold block tabular-nums">{event.impact}</span>
+                      <span className="text-[11px] text-slate-400">Recovery: {event.recoveryTime}</span>
                     </div>
                   </div>
                 ))}
@@ -497,26 +595,47 @@ const Dashboard: React.FC<DashboardProps> = ({
       </div>
 
       {/* AI Narrative */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-        <div className="flex justify-between items-start mb-4">
-          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-            <span className="bg-emerald-500/20 p-1.5 rounded text-emerald-400">
+      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-6 shadow-xl backdrop-blur-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <h3 className="text-base font-bold text-white flex items-center gap-2 tracking-tight">
+            <span className="bg-emerald-500/15 border border-emerald-500/30 p-1.5 rounded-lg text-emerald-400 shadow-inner">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
             </span>
             AI Strategy Synthesis
           </h3>
-          {isGeneratingNarrative && <Loader2 className="w-4 h-4 text-emerald-500 animate-spin" />}
+          
+          <div className="flex items-center gap-2">
+            {narrativeData && (
+              <button
+                onClick={handleCopyStrategy}
+                className="flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-xl border border-slate-700 transition-all active:scale-95 shadow-sm"
+              >
+                {isCopied ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-emerald-400 font-medium">Copied Strategy</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Copy Report</span>
+                  </>
+                )}
+              </button>
+            )}
+            {isGeneratingNarrative && <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />}
+          </div>
         </div>
         
         {isGeneratingNarrative || !narrativeData ? (
           <div className="space-y-3">
-            <div className="h-4 w-full bg-gray-800 rounded animate-pulse"></div>
-            <div className="h-4 w-11/12 bg-gray-800 rounded animate-pulse"></div>
-            <div className="h-4 w-full bg-gray-800 rounded animate-pulse"></div>
-            <div className="h-4 w-4/5 bg-gray-800 rounded animate-pulse"></div>
+            <div className="h-4 w-full bg-slate-800/80 rounded-lg animate-pulse"></div>
+            <div className="h-4 w-11/12 bg-slate-800/80 rounded-lg animate-pulse"></div>
+            <div className="h-4 w-full bg-slate-800/80 rounded-lg animate-pulse"></div>
+            <div className="h-4 w-4/5 bg-slate-800/80 rounded-lg animate-pulse"></div>
           </div>
         ) : (
-          <div className="prose prose-invert max-w-none text-gray-300 leading-relaxed animate-in fade-in duration-500">
+          <div className="prose prose-invert max-w-none text-slate-300 leading-relaxed animate-in fade-in duration-500 text-sm">
             {narrativeData.narrative.split('\n').map((paragraph, idx) => (
               <p key={idx} className="mb-4 last:mb-0">{paragraph}</p>
             ))}
@@ -525,23 +644,24 @@ const Dashboard: React.FC<DashboardProps> = ({
       </div>
 
       {/* Visual Drill-down Modal */}
+      {/* Category Deep Dive Modal */}
       {selectedCategory && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-750 rounded-2xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border-slate-800">
             
             {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-gray-850 flex-shrink-0">
+            <div className="px-6 py-4 border-b border-slate-800/80 flex items-center justify-between bg-slate-950/80 flex-shrink-0">
               <div className="flex items-center gap-3">
-                <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
                   <span className="text-emerald-400">Deep Dive:</span> {selectedCategory}
                 </h3>
-                <span className="bg-blue-900/30 text-blue-400 text-xs px-2 py-1 rounded border border-blue-800/50 flex items-center gap-1">
-                  <Database className="w-3 h-3" /> Live BQ Data
+                <span className="bg-blue-500/10 text-blue-400 text-xs px-2.5 py-1 rounded-full border border-blue-500/25 flex items-center gap-1.5 font-mono">
+                  <Database className="w-3 h-3" /> Live BigQuery
                 </span>
               </div>
               <button 
                 onClick={closeModal}
-                className="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
+                className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-all"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -555,19 +675,19 @@ const Dashboard: React.FC<DashboardProps> = ({
                     <div className="absolute inset-0 border-4 border-emerald-500/20 rounded-full"></div>
                     <div className="absolute inset-0 border-4 border-emerald-500 rounded-full border-t-transparent animate-spin"></div>
                   </div>
-                  <p className="text-gray-400 animate-pulse">Analyzing historical data & predicting optimal split...</p>
+                  <p className="text-sm text-slate-400 animate-pulse font-medium">Analyzing historical time series & synthesizing optimal sub-allocation...</p>
                 </div>
               ) : recError ? (
-                <div className="bg-red-500/10 border border-red-500/50 text-red-400 p-4 rounded-lg text-center">
+                <div className="bg-red-500/10 border border-red-500/40 text-red-300 p-4 rounded-xl text-center text-sm">
                   {recError}
                 </div>
               ) : categoryRec ? (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 animate-in slide-in-from-bottom-4 duration-300 h-full">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in slide-in-from-bottom-3 duration-300 h-full">
                   
                   {/* Left Column: Visual Chart & Sub-categories */}
-                  <div className="lg:col-span-5 flex flex-col space-y-6">
-                    <div className="flex flex-col items-center justify-center bg-gray-950 rounded-xl border border-gray-800 p-6">
-                      <h4 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2 w-full text-left">Recommended Split</h4>
+                  <div className="lg:col-span-5 flex flex-col space-y-4">
+                    <div className="flex flex-col items-center justify-center bg-slate-950/80 rounded-2xl border border-slate-800 p-6">
+                      <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 w-full text-left">Recommended Split</h4>
                       <div className="w-full h-[220px]">
                         <ResponsiveContainer width="100%" height="100%">
                           <PieChart>
@@ -587,8 +707,8 @@ const Dashboard: React.FC<DashboardProps> = ({
                               ))}
                             </Pie>
                             <Tooltip 
-                              contentStyle={{ backgroundColor: '#1f2937', borderColor: '#374151', color: '#f3f4f6', borderRadius: '0.5rem' }}
-                              itemStyle={{ color: '#f3f4f6' }}
+                              contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', color: '#f8fafc', borderRadius: '0.75rem' }}
+                              itemStyle={{ color: '#f8fafc' }}
                               formatter={(value: number) => [`${value}%`, 'Allocation']}
                             />
                           </PieChart>
@@ -597,25 +717,25 @@ const Dashboard: React.FC<DashboardProps> = ({
                       
                       {/* Interactive Legend */}
                       <div className="w-full space-y-2 mt-4">
-                        <p className="text-xs text-gray-500 mb-2">Click a category to view AI asset picks</p>
+                        <p className="text-[11px] text-slate-400 mb-2">Click a category to view AI asset picks</p>
                         {categoryRec.subCategories.map((sub, idx) => (
                           <div 
                             key={idx} 
                             onClick={() => handleSubCategoryClick(sub.name)}
-                            className={`flex flex-col p-3 rounded-lg border cursor-pointer transition-all ${
+                            className={`flex flex-col p-3 rounded-xl border cursor-pointer transition-all ${
                               selectedSubCategory === sub.name 
-                                ? 'bg-gray-800 border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.1)]' 
-                                : 'bg-gray-900 border-gray-800 hover:border-gray-700 hover:bg-gray-850'
+                                ? 'bg-slate-800 border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.15)]' 
+                                : 'bg-slate-900 border-slate-800 hover:border-slate-700 hover:bg-slate-850'
                             }`}
                           >
                             <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2.5">
                                 <div className="w-3 h-3 rounded-full" style={{ backgroundColor: SUB_COLORS[idx % SUB_COLORS.length] }}></div>
-                                <span className="font-medium text-white text-sm">{sub.name}</span>
+                                <span className="font-semibold text-white text-xs sm:text-sm">{sub.name}</span>
                               </div>
                               <div className="flex items-center gap-2">
-                                <span className="font-bold text-emerald-400 text-sm">{sub.percentage}%</span>
-                                <ChevronRight className={`w-4 h-4 ${selectedSubCategory === sub.name ? 'text-emerald-500' : 'text-gray-600'}`} />
+                                <span className="font-bold text-emerald-400 text-xs sm:text-sm font-mono tabular-nums">{sub.percentage}%</span>
+                                <ChevronRight className={`w-4 h-4 ${selectedSubCategory === sub.name ? 'text-emerald-400' : 'text-slate-500'}`} />
                               </div>
                             </div>
                           </div>
@@ -628,80 +748,90 @@ const Dashboard: React.FC<DashboardProps> = ({
                   <div className="lg:col-span-7 flex flex-col">
                     {!selectedSubCategory ? (
                       // Default View: Key Takeaways
-                      <div className="bg-gray-950 rounded-xl border border-gray-800 p-6 h-full">
-                        <h4 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-6">Market Analysis & Strategy</h4>
-                        <div className="space-y-5">
+                      <div className="bg-slate-950/80 rounded-2xl border border-slate-800 p-6 h-full flex flex-col">
+                        <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-5">Market Analysis & Strategy</h4>
+                        <div className="space-y-4 flex-grow">
                           {categoryRec.keyTakeaways.map((takeaway, idx) => (
-                            <div key={idx} className="flex gap-4 items-start bg-gray-900 p-5 rounded-xl border border-gray-800/50">
-                              <CheckCircle2 className="w-6 h-6 text-emerald-500 flex-shrink-0 mt-0.5" />
-                              <p className="text-sm text-gray-300 leading-relaxed">{takeaway}</p>
+                            <div key={idx} className="flex gap-3.5 items-start bg-slate-900/80 p-4 rounded-xl border border-slate-800/80">
+                              <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0 mt-0.5" />
+                              <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">{takeaway}</p>
                             </div>
                           ))}
                         </div>
-                        <div className="mt-8 p-4 bg-blue-900/10 border border-blue-900/30 rounded-lg flex items-start gap-3">
-                          <Activity className="w-5 h-5 text-blue-400 flex-shrink-0 mt-0.5" />
+                        <div className="mt-6 p-4 bg-blue-500/10 border border-blue-500/25 rounded-xl flex items-start gap-3">
+                          <Activity className="w-4 h-4 text-blue-400 flex-shrink-0 mt-0.5" />
                           <p className="text-xs text-blue-300 leading-relaxed">
-                            Select a sub-category on the left to generate a real-time list of top specific asset recommendations based on current market conditions and your profile.
+                            Select a sub-category on the left to generate real-time stock & ETF rankings based on trailing returns from BigQuery.
                           </p>
                         </div>
                       </div>
                     ) : (
                       // Drill-down View: Top AI Picks
-                      <div className="bg-gray-950 rounded-xl border border-gray-800 p-6 flex flex-col h-full">
-                        <div className="flex items-center justify-between mb-6 pb-4 border-b border-gray-800">
+                      <div className="bg-slate-950/80 rounded-2xl border border-slate-800 p-6 flex flex-col h-full">
+                        <div className="flex items-center justify-between mb-5 pb-4 border-b border-slate-800/80">
                           <div>
-                            <h4 className="text-sm font-semibold text-emerald-400 uppercase tracking-wider">Top AI Picks</h4>
-                            <p className="text-xl font-bold text-white mt-1">{selectedSubCategory}</p>
+                            <h4 className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">Top AI Picks</h4>
+                            <p className="text-base sm:text-lg font-bold text-white mt-0.5">{selectedSubCategory}</p>
                           </div>
                           <button 
                             onClick={() => setSelectedSubCategory(null)}
-                            className="flex items-center gap-1 text-sm text-gray-400 hover:text-white transition-colors bg-gray-900 px-3 py-1.5 rounded-lg border border-gray-800"
+                            className="flex items-center gap-1.5 text-xs font-medium text-slate-300 hover:text-white transition-all bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-800 hover:border-slate-700 active:scale-95"
                           >
-                            <ArrowLeft className="w-4 h-4" /> Back
+                            <ArrowLeft className="w-3.5 h-3.5" /> Back
                           </button>
                         </div>
 
                         {isLoadingPicks ? (
-                          <div className="flex flex-col items-center justify-center flex-grow space-y-4">
+                          <div className="flex flex-col items-center justify-center flex-grow space-y-4 py-12">
                             <div className="relative w-10 h-10">
                               <div className="absolute inset-0 border-4 border-blue-500/20 rounded-full"></div>
                               <div className="absolute inset-0 border-4 border-blue-500 rounded-full border-t-transparent animate-spin"></div>
                             </div>
-                            <p className="text-sm text-gray-400 animate-pulse">Synthesizing top assets for {selectedSubCategory}...</p>
+                            <p className="text-xs sm:text-sm text-slate-400 animate-pulse font-medium">Fetching real-time ticker data for {selectedSubCategory}...</p>
                           </div>
                         ) : assetPicks ? (
-                          <div className="space-y-4 overflow-y-auto pr-2 custom-scrollbar flex-grow">
+                          <div className="space-y-3.5 overflow-y-auto pr-1 custom-scrollbar flex-grow">
                             {assetPicks.map((pick, idx) => (
-                              <div key={idx} className="bg-gray-900 border border-gray-800 rounded-xl p-4 hover:border-gray-700 transition-colors">
+                              <div key={idx} className="bg-slate-900 border border-slate-800 rounded-xl p-4 hover:border-slate-700 transition-all shadow-sm">
                                 <div className="flex justify-between items-start mb-3">
-                                  <div className="flex items-center gap-3">
-                                    <span className="bg-gray-800 text-gray-300 text-xs font-bold px-2.5 py-1 rounded border border-gray-700">
+                                  <div className="flex items-center gap-2.5">
+                                    <span className="bg-slate-950 text-slate-200 text-xs font-bold px-2.5 py-1 rounded-lg border border-slate-800 font-mono">
                                       {pick.symbol}
                                     </span>
-                                    <h5 className="font-semibold text-white text-sm">{pick.name}</h5>
+                                    <h5 className="font-bold text-white text-xs sm:text-sm">{pick.name}</h5>
                                   </div>
-                                  <span className="text-emerald-400 font-mono text-sm font-medium bg-emerald-500/10 px-2 py-0.5 rounded">
+                                  <span className="text-emerald-400 font-mono text-xs sm:text-sm font-semibold bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-0.5 rounded-lg tabular-nums">
                                     {pick.currentPriceEstimate}
                                   </span>
                                 </div>
                                 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
-                                  <div className="space-y-1">
-                                    <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1">
-                                      <TrendingDown className="w-3 h-3" /> Past Performance
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+                                  {(() => {
+                                    const text = pick.pastPerformance || '';
+                                    // Match negative signs preceding numbers (e.g. -5%, - 2.3%) or words indicating loss, but NOT hyphens like '1-Year'
+                                    const isNegative = /-\s*\d+/.test(text) || /\b(loss|down|drop|fall|negative)\b/i.test(text);
+                                    return (
+                                      <div className={`space-y-1 p-2.5 rounded-lg border ${isNegative ? 'bg-red-950/30 border-red-800/30' : 'bg-emerald-950/30 border-emerald-800/30'}`}>
+                                        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                                          {isNegative 
+                                            ? <TrendingDown className="w-3 h-3 text-red-400" /> 
+                                            : <TrendingUp className="w-3 h-3 text-emerald-400" />
+                                          } Past Performance
+                                        </p>
+                                        <p className={`text-xs leading-relaxed font-mono tabular-nums ${isNegative ? 'text-red-300' : 'text-emerald-300'}`}>{pick.pastPerformance}</p>
+                                      </div>
+                                    );
+                                  })()}
+                                  <div className="space-y-1 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/60">
+                                    <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
+                                      <TrendingUp className="w-3 h-3 text-emerald-400" /> Future Outlook
                                     </p>
-                                    <p className="text-xs text-gray-300 leading-relaxed">{pick.pastPerformance}</p>
-                                  </div>
-                                  <div className="space-y-1">
-                                    <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1">
-                                      <TrendingUp className="w-3 h-3" /> Future Outlook
-                                    </p>
-                                    <p className="text-xs text-gray-300 leading-relaxed">{pick.futurePrediction}</p>
+                                    <p className="text-xs text-slate-300 leading-relaxed">{pick.futurePrediction}</p>
                                   </div>
                                 </div>
                                 
-                                <div className="mt-4 pt-3 border-t border-gray-800/50">
-                                  <p className="text-xs text-gray-400"><span className="text-emerald-500 font-medium">Why it fits you:</span> {pick.reasoning}</p>
+                                <div className="mt-3 pt-2.5 border-t border-slate-800/60">
+                                  <p className="text-xs text-slate-400"><span className="text-emerald-400 font-medium">Why it fits you:</span> {pick.reasoning}</p>
                                 </div>
                               </div>
                             ))}
